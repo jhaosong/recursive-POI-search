@@ -1,0 +1,74 @@
+!pip install googlemaps requests==2.31.0
+import googlemaps
+import pandas as pd
+import time
+from math import radians, sin, cos, sqrt, atan2
+from google.colab import files
+
+# API Key
+api_key = 'key'  # put in your api key
+gmaps = googlemaps.Client(key=api_key)
+
+# calculate the distance between corners
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371000  
+    phi1 = radians(lat1)
+    phi2 = radians(lat2)
+    delta_phi = radians(lat2 - lat1)
+    delta_lambda = radians(lon2 - lon1)
+
+    a = sin(delta_phi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(delta_lambda / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    return R * c
+
+def search_poi(location, radius):
+    results = gmaps.places_nearby(location=location, radius=radius, type='point_of_interest')
+    poi_data = []
+
+    # first 20 results
+    for result in results['results']:
+        poi_data.append((result['name'], result.get('vicinity'), result['geometry']['location']['lat'], result['geometry']['location']['lng']))
+
+    # use of next page token for more results
+    if radius <= 100:
+        while 'next_page_token' in results:
+            time.sleep(2)  # google regulation on request time 
+            results = gmaps.places_nearby(page_token=results['next_page_token'])
+            for result in results['results']:
+                poi_data.append((result['name'], result.get('vicinity'), result['geometry']['location']['lat'], result['geometry']['location']['lng']))
+
+    return poi_data
+
+def recursive_search(latleft, lngleft, latright, lngright, depth=0, max_depth=10):
+    if depth > max_depth:
+        return []
+    mid_lat = (latleft + latright) / 2
+    mid_lng = (lngleft + lngright) / 2
+    radius = haversine(latleft, lngleft, latright, lngright) / 2
+    if radius < 10:
+      return []
+    poi_data = search_poi([mid_lat, mid_lng], radius)
+    if len(poi_data) < 20 or (len(poi_data) < 60 and radius <= 100):
+        return poi_data
+    
+    all_poi_data = []
+    all_poi_data.extend(recursive_search(latleft, lngleft, mid_lat, mid_lng, depth + 1, max_depth))
+    all_poi_data.extend(recursive_search(mid_lat, mid_lng, latright, lngright, depth + 1, max_depth))
+    all_poi_data.extend(recursive_search(mid_lat, lngleft, latright, mid_lng, depth + 1, max_depth))
+    all_poi_data.extend(recursive_search(latleft, mid_lng, mid_lat, lngright, depth + 1, max_depth))
+
+    return all_poi_data
+
+# initialize the information
+latleft, lngleft = 22.303216861401754, 114.17186984077739  # upper left
+latright, lngright =22.29841577742506, 114.17677176329622 # lower right
+
+
+poi_data = recursive_search(latleft, lngleft, latright, lngright)
+unique_poi_data = list(set(poi_data))
+
+# save to excel
+df = pd.DataFrame(unique_poi_data, columns=['Name', 'Address', 'Latitude', 'Longitude'])
+df.to_excel('poi_data.xlsx', index=False)
+files.download('poi_data.xlsx')  
